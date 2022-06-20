@@ -7,6 +7,7 @@ package dmr
 import (
 	"database/sql"
 	"database/sql/driver"
+	"io"
 	"math"
 	"reflect"
 	"strings"
@@ -184,7 +185,7 @@ const (
 
 	CURRENCY_SCALE = 4
 
-	FLOAT_SCALE_MASK = 0X81
+	FLOAT_SCALE_MASK = 0x81
 )
 
 func resetColType(stmt *DmStatement, i int, colType int32) bool {
@@ -430,11 +431,43 @@ func (column *column) getColumnData(bytes []byte, conn *DmConnection) (driver.Va
 	case BINARY, VARBINARY:
 		return bytes, nil
 	case BLOB:
-		return DB2G.toDmBlob(bytes, column, conn), nil
+		//包含服务器编码信息，但是我们默认丢失，可能会导致中文乱码
+		//return DB2G.toDmBlob(bytes, column, conn), nil
+		var err error
+		var blob = DB2G.toDmBlob(bytes, column, conn)
+		length, err := blob.GetLength()
+		if err != nil {
+			return "", err
+		}
+		var data = make([]byte, length)
+		_, err = blob.Read(data)
+		if err != nil {
+			if err == io.EOF {
+				return "", nil
+			}
+			return "", err
+		}
+		return string(data), nil
 	case CHAR, VARCHAR2, VARCHAR:
 		return Dm_build_1220.Dm_build_1377(bytes, 0, len(bytes), conn.getServerEncoding(), conn), nil
 	case CLOB:
-		return DB2G.toDmClob(bytes, conn, column), nil
+		//包含服务器编码信息，但是我们默认丢失，可能会导致中文乱码
+		//return DB2G.toDmClob(bytes, conn, column), nil
+		var err error
+		var data string
+		var clob = DB2G.toDmClob(bytes, conn, column)
+		length, err := clob.GetLength()
+		if err != nil {
+			return "", err
+		}
+		data, err = clob.ReadString(1, int(length))
+		if err != nil {
+			if err == io.EOF {
+				return "", nil
+			}
+			return "", err
+		}
+		return data, nil
 	}
 
 	return string(bytes), nil
